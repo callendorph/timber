@@ -9,6 +9,7 @@
             "command": "${workspaceFolder}/run-tests.bat",
             "args": [
                 "${workspaceFolder}/tests/Logger.stanza",
+                "${workspaceFolder}/tests/Formatter.stanza",
             ],
             "group": "test",
             "presentation": {

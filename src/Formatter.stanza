@@ -4,8 +4,76 @@ defpackage timber/Formatter :
   import collections
   import timber/LogRecord
 
+defenum FmtState :
+  FMT_TMP
+  FMT_OPEN_BRACKET
+  FMT_CLOSE_BRACKET
+  FMT_PARAM_NAME
 
-public deftype Formatter <: Equalable & Hashable
+
+public defn parse-format (fmt:String) -> [String, Tuple<String>] :
+  ; Format strings will come in the following form:
+  ;
+  ;  "{level}:{name}:{msg}"
+  ;  "{time}:{level}::  {name}  ::  {msg}"
+  ;
+  ;  This function will extract the `{}` values and convert them to a tuple of strings
+  ;  It will then replace the `{}` with a `%_` and return a template string like:
+  ;
+  ;  "%_:%_:%_"
+  ;  "%_:%_::  %_  ::  %_"
+  ;
+  ;  This template can then be used to create a Printable object.
+  var state = FMT_TMP
+  val tmp = StringBuffer()
+  val params = Vector<String>()
+  val paramName = StringBuffer()
+
+  val OPBRK = '{'
+  val CLBRK = '}'
+
+  for ch in fmt do :
+    ; println("State=%_ ch=%_" % [state, ch])
+    switch {state == _}:
+      FMT_TMP:
+        if ch == OPBRK:
+          state = FMT_OPEN_BRACKET
+        else if ch == CLBRK:
+          state = FMT_CLOSE_BRACKET
+        else:
+          add(tmp, ch)
+      FMT_OPEN_BRACKET:
+        if ch == OPBRK:
+          add(tmp, ch)
+          state = FMT_TMP
+        else:
+          add-all(tmp, ['%', '_'])
+          clear(paramName)
+          add(paramName, ch)
+          state = FMT_PARAM_NAME
+      FMT_CLOSE_BRACKET:
+        if ch != CLBRK:
+          fatal("Unexpected '}' - Mismatched closing bracket")
+        add(tmp, ch)
+        state = FMT_TMP
+      FMT_PARAM_NAME:
+        if ch == CLBRK:
+          val obsParam = to-string(paramName)
+          add(params, obsParam)
+          state = FMT_TMP
+        else:
+          add(paramName, ch)
+
+  [to-string(tmp), to-tuple(params)]
+
+defn to-converter (param:String) -> (LogRecord -> String) :
+  switch {param == _} :
+    "level": {mk-string(level(_))}
+    "name" : name
+    "msg" : msg
+    else: fatal("Invalid Captured Parameter Name: %_" % [param])
+
+public deftype Formatter
 
 ; Provide a format for the output log message:
 ;  We use the `{}` style construction syntax because the default
@@ -17,9 +85,12 @@ public defmulti set-time-format (f:Formatter, fmt:String) -> False
 public defmulti get-time-format (f:Formatter) -> String
 public defmulti format (f:Formatter, record:LogRecord) -> String
 
-public defn Formatter (fmt:String, time-fmt:String) -> Formatter :
+public defn Formatter (fmt, time-fmt) -> Formatter :
   var m-fmt = fmt
   var t-fmt = time-fmt
+
+  val [fmt-tmp, params] = parse-format(fmt)
+  val converters = map(to-converter, params)
 
   new Formatter:
     defmethod set-format (this, fmt:String): m-fmt = fmt
@@ -27,14 +98,14 @@ public defn Formatter (fmt:String, time-fmt:String) -> Formatter :
     defmethod set-time-format (this, fmt:String) : t-fmt = fmt
     defmethod get-time-format (this) : t-fmt
     defmethod format (this, record) :
-      to-string("%_:%_:%_" % [mk-string(level(record)), name(record), msg(record)])
-    defmethod hash (this) -> Int:
-      (hash(m-fmt) * 51) + (hash(t-fmt) * 43)
+      val comps = map(_{record}, converters)
+      to-string(fmt-tmp % comps)
+
+public defn Formatter (fmt:String) -> Formatter :
+  ; @TODO implement proper format time strings here.
+  Formatter(fmt, "")
+
 
 public defn Formatter () -> Formatter :
-  ; @TODO implement proper format strings here for the
-  ;  defaults we want to use.
-  Formatter("", "")
-
-public defmethod equal? (a:Formatter, b:Formatter) -> True|False :
-  hash(a) == hash(b)
+  ; Default String Format for Log Messages.
+  Formatter("{level}:{name}:{msg}")

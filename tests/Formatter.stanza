@@ -1,0 +1,18 @@
+#use-added-syntax(tests)
+defpackage timber/tests/Formatter :
+  import core
+  import collections
+  import timber/Logger
+  import timber/Formatter
+  import timber/LogRecord
+
+
+deftest(formatter) test-formatter :
+  val fmt =  Formatter("{name} -- {level} -- {msg}")
+  val line = format(fmt, LogRecord("asdf", LOG_INFO, "Some Message"))
+  #EXPECT(line == "asdf -- INFO -- Some Message")
+
+deftest(formatter) test-literal-brackets :
+  val fmt =  Formatter("{name} -- {{{level}}} -- }} {msg} {{")
+  val line = format(fmt, LogRecord("asdf", LOG_INFO, "Some Message"))
+  #EXPECT(line == "asdf -- {INFO} -- } Some Message {")

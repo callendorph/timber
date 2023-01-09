@@ -68,7 +68,7 @@ public defn ConsoleHandler (f:Formatter) -> ConsoleHandler :
       current-error-stream()
 
     defmethod hash (this) -> Int :
-      hash("std-error") + (hash(fmt) * 97) + (hash(to-tuple(filters)) * 83)
+      hash("std-error") + (hash(to-tuple(filters)) * 83)
 
 public defn ConsoleHandler () -> ConsoleHandler :
   ConsoleHandler(Formatter())
