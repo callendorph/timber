@@ -1,0 +1,6 @@
+packages timber/* defined-in "src/"
+packages timber/tests/* defined-in "tests/"
+
+; build main :
+;   inputs:
+;   pkg: "pkgs"

@@ -1,0 +1,228 @@
+;  Timber is a logging interface based on Python's logging module.
+; It is not intended to be more than a modicum of improvement over nothing.
+;
+defpackage timber/Logger :
+  import core
+  import collections
+  import timber/LogRecord
+  import timber/Formatter
+
+
+; Filters are functions in the form:
+;  (LogRecord -> True|False)
+;
+;  A filter returns TRUE when the logrecord must NOT be emitted.
+;           returns FALSE when the logrecord will be emitted.
+;
+; Filters typically are used with currying to create functions in the
+;   proper format.
+
+public defn quell-by-name (n:String, l:LogRecord) -> True|False :
+  name(l) == n
+
+public deftype Filtering
+
+public defmulti filters (f:Filtering) -> Vector<(LogRecord -> True|False)>
+public defmulti filter (f:Filtering, record:LogRecord) -> True|False
+
+public defmethod filter (f:Filtering, record:LogRecord) :
+  label<True|False> return:
+    for func in filters(f) do:
+      if func(record):
+        return(true)
+    return(false)
+
+public deftype Handler <: Equalable & Hashable & Filtering
+
+public defmulti formatter (h:Handler) -> Formatter
+
+public defmulti handle (h:Handler, record:LogRecord) -> True|False
+public defmulti emit (h:Handler, record:LogRecord) -> False
+
+public defmethod handle (h:Handler, record) :
+  label<True|False> return:
+    if filter(h, record):
+      return(false)
+
+    emit(h, record)
+    return(true)
+
+public deftype StreamHandler <: Handler
+
+public defmulti get-stream (s:StreamHandler) -> OutputStream
+
+public defmethod emit (s:StreamHandler, record) -> False :
+  val msg = format(formatter(s), record)
+  println(get-stream(s), msg)
+
+public deftype ConsoleHandler <: StreamHandler
+
+public defn ConsoleHandler (f:Formatter) -> ConsoleHandler :
+  var fmt = f
+  val filters = Vector<(LogRecord -> True|False)>()
+  new ConsoleHandler:
+    defmethod formatter (this) : fmt
+    defmethod filters (this) : filters
+
+    defmethod get-stream (this) -> OutputStream :
+      current-error-stream()
+
+    defmethod hash (this) -> Int :
+      hash("std-error") + (hash(fmt) * 97) + (hash(to-tuple(filters)) * 83)
+
+public defn ConsoleHandler () -> ConsoleHandler :
+  ConsoleHandler(Formatter())
+
+public defn equal? (a:ConsoleHandler, b:ConsoleHandler) -> True|False :
+  hash(a) == hash(b)
+
+public deftype Logger <: Equalable & Hashable & Filtering
+
+public defmulti name (l:Logger) -> String
+public defmulti parent (l:Logger) -> Maybe<Logger>
+public defmulti handlers (l:Logger) -> Vector<Handler>
+public defmulti propagates? (l:Logger) -> True|False
+public defmulti set-propagate (l:Logger, enable:True|False) -> False
+
+public defmulti set-level (l:Logger, lvl:LogLevel) -> False
+public defmulti get-level (l:Logger) -> LogLevel
+
+public defmulti log (l:Logger, lvl:LogLevel, r:LogRecord) -> False
+public defmulti log (l:Logger, lvl:LogLevel, msg:String|Printable) -> False
+public defmulti emit (l:Logger, r:LogRecord) -> False
+
+; Get a child logger if one exists
+public defmulti get (l:Logger, name:String) -> Logger
+public defmulti set (l:Logger, name:String, child:Logger) -> False
+public defmulti children (l:Logger) -> Tuple<KeyValue<String,Logger>>
+
+public defmulti trace (l:Logger, msg:String|Printable) -> False
+public defmulti debug (l:Logger, msg:String|Printable) -> False
+public defmulti info (l:Logger, msg:String|Printable) -> False
+public defmulti warn (l:Logger, msg:String|Printable) -> False
+public defmulti error (l:Logger, msg:String|Printable) -> False
+public defmulti fatal (l:Logger, msg:String|Printable) -> False
+
+public defmethod trace (l:Logger, msg:String|Printable) -> False :
+  log(l, LOG_TRACE, msg)
+
+public defmethod debug (l:Logger, msg:String|Printable) -> False :
+  log(l, LOG_DEBUG, msg)
+
+public defmethod info (l:Logger, msg:String|Printable) -> False :
+  log(l, LOG_INFO, msg)
+
+public defmethod warn (l:Logger, msg:String|Printable) -> False :
+  log(l, LOG_WARN, msg)
+
+public defmethod error (l:Logger, msg:String|Printable) -> False :
+  log(l, LOG_ERROR, msg)
+
+public defmethod fatal (l:Logger, msg:String|Printable) -> False :
+  log(l, LOG_FATAL, msg)
+
+public defn Logger (n:String, lvl:LogLevel, parent:Maybe<Logger>, propagate:True|False) -> Logger :
+  val logName = n
+  val parent? = parent
+
+  ; Mutables
+  val _handlers = Vector<Handler>()
+  val _filters = Vector<(LogRecord -> True|False)>()
+  val kids = HashTable<String,Logger>()
+  var level = lvl
+  var prop = propagate
+
+  defn convert-msg (msg:String|Printable) -> String :
+      match(msg):
+        (x:Printable): to-string(x)
+        (y:String): y
+
+  new Logger :
+    defmethod name (this) : logName
+    defmethod parent (this) : parent?
+    defmethod propagates? (this) : prop
+    defmethod set-propagate (this, enable:True|False) : prop = enable
+    defmethod handlers (this) : _handlers
+    defmethod filters (this) : _filters
+    defmethod set-level (this, lvl:LogLevel) : level = lvl
+    defmethod get-level (this) : level
+
+    defmethod log (this, lvl:LogLevel, r:LogRecord) :
+      label<False> return:
+        if to-int(lvl) < to-int(level):
+          return(false)
+
+        if filter(this, r):
+          return(false)
+
+        emit(this, r)
+
+        if not prop:
+          return(false)
+
+        match(parent?):
+          (o:One<Logger>):
+            val parent = value(o)
+            log(parent, lvl, r)
+          (_:None): false
+        return(false)
+
+    defmethod log (this, lvl:LogLevel, content:String|Printable) :
+      val msg = convert-msg(content)
+      val record = LogRecord(logName, lvl, msg)
+      log(this, lvl, record)
+
+    defmethod emit (this, r:LogRecord) :
+      for h in handlers(this) do:
+        emit(h, r)
+
+    ; Get a child logger or create if one doesn't
+    ;   exist.
+    defmethod get (this, name:String) :
+      val ret = get?(kids, name)
+      match(ret):
+        (l:Logger): l
+        (_:False):
+          val child = Logger(name, level, One(this))
+          set(kids, name, child)
+          child
+
+    defmethod set (this, name:String, child:Logger) :
+      set(kids, name, child)
+
+    defmethod children (this) : to-tuple(kids)
+
+    defmethod hash (this) :
+      (hash(logName) * 7) + (hash(parent?) * 13) + hash(to-tuple(_handlers)) + hash(lvl)
+
+public defn Logger (n:String, lvl:LogLevel, parent:Maybe<Logger>) -> Logger :
+  Logger(n, lvl, parent, true)
+
+defmethod equal? (a:Logger, b:Logger) -> True|False :
+  hash(a) == hash(b)
+
+var root:Maybe<Logger> = None()
+
+defn setup-root-logger () -> Logger :
+  val ret = Logger("root", LOG_ERROR, None())
+  add(handlers(ret), ConsoleHandler())
+  root = One(ret)
+  ret
+
+public defn get-logger (name?:String|False) -> Logger :
+  ; Get a logger by name. If no name is provided - we will
+  ;   return the root logger.
+  match(name?):
+    (name:String):
+      val rlog = get-logger()
+      get(rlog, name)
+    (_:False):
+      match(root):
+        (o:One<Logger>): value(o)
+        (_:None): setup-root-logger()
+
+public defn get-logger () -> Logger :
+  get-logger(false)
+
+public defn reset-root-logger () -> False :
+  root = None()

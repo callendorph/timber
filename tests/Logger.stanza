@@ -1,0 +1,282 @@
+#use-added-syntax(tests)
+defpackage timber/tests/Logger :
+  import core
+  import collections
+  import timber/Logger
+  import timber/LogRecord
+
+defn capture-error ( func : () -> ? ) -> String :
+  val buf = StringBuffer(128)
+  with-error-stream(buf, func)
+  to-string(buf)
+
+defn to-lines (s:String) -> Tuple<String> :
+  val lines = map(trim, to-tuple(split(s, "\n")))
+  to-tuple(filter({length(_) > 0}, lines))
+
+defn check-lines (obs:Tuple<String>, exp:Tuple<String>) :
+  #EXPECT(length(obs) == length(exp))
+  if length(obs) != length(exp):
+    fatal("Obs != Exp:\n obs=%_\n exp=%_\n" % [obs, exp])
+  for i in 0 to length(exp) do :
+    #EXPECT(obs[i] == exp[i])
+
+defn setup-console-logger () -> Logger :
+  val ret = Logger("test", LOG_ERROR, None())
+  add(handlers(ret), ConsoleHandler())
+  ret
+
+deftest(basics) test-basic :
+
+  val log = setup-console-logger()
+
+  defn test-seq () :
+    info(log, "First Blocked Message: %_" % [1])
+    error(log, "First Recorded Message: %_" % [1])
+
+  var err = capture-error(test-seq)
+
+  ; println("Log: %_" % [err])
+  val lines = to-lines(err)
+
+  val expLines = [
+    "ERROR:test:First Recorded Message: 1",
+  ]
+  check-lines(lines, expLines)
+
+deftest(basics) test-level-change :
+
+  val log = setup-console-logger()
+
+  defn test-seq () :
+    info(log, "First Blocked Message: %_" % [1])
+    error(log, "First Recorded Message: %_" % [1])
+
+    set-level(log, LOG_INFO)
+    info(log, "Second Recorded Message")
+    error(log, "Third Recorded Message - %_" % [3])
+
+    set-level(log, LOG_ERROR)
+
+    info(log, "Second Blocked Message")
+    error(log, "Fourth Recorded Message - %_" % [4])
+
+
+  var err = capture-error(test-seq)
+
+  val lines = to-lines(err)
+  val expLines = [
+    "ERROR:test:First Recorded Message: 1",
+    "INFO:test:Second Recorded Message",
+    "ERROR:test:Third Recorded Message - 3",
+    "ERROR:test:Fourth Recorded Message - 4",
+  ]
+  check-lines(lines, expLines)
+
+deftest(basics) test-root-logger :
+  ; test that the default root logger gets created and
+  ;  can be accessed.
+  reset-root-logger()
+  val log = get-logger()
+
+  defn test-seq () :
+    trace(log, "Blocked Trace Message")
+    debug(log, "Blocked Debug Message")
+    info(log, "Blocked Info Message")
+    warn(log, "Blocked Warn Message")
+    error(log, "First Recorded Message: %_" % [1])
+
+  var err = capture-error(test-seq)
+
+  val lines = to-lines(err)
+  val expLines = [
+    "ERROR:root:First Recorded Message: 1",
+  ]
+  check-lines(lines, expLines)
+
+  val log2 = get-logger()
+  #EXPECT(log == log2)
+
+deftest(basics) test-root-init :
+  ; test that the default root logger gets created when
+  ;  we ask for a non-root logger on start.
+  ;  can be accessed.
+  reset-root-logger()
+  val log = get-logger("warp")
+  val parent? = parent(log)
+  match(parent?):
+    (_:None): fatal("Expected Root Logger Not None")
+    (o:One<Logger>):
+      val parent = value(o)
+      val root = get-logger()
+      #EXPECT(parent == root)
+
+  defn test-seq () :
+    trace(log, "Blocked Trace Message")
+    debug(log, "Blocked Debug Message")
+    info(log, "Blocked Info Message")
+    warn(log, "Blocked Warn Message")
+    error(log, "First Recorded Message: %_" % [1])
+
+  var err = capture-error(test-seq)
+
+  ; println("Log: %_" % [err])
+  val lines = to-lines(err)
+  val expLines = [
+      "ERROR:warp:First Recorded Message: 1",
+  ]
+  check-lines(lines, expLines)
+
+deftest(basics) test-propagation :
+
+  val log = setup-console-logger()
+  #EXPECT(name(log) == "test")
+
+  var kids = children(log)
+  #EXPECT(length(kids) == 0)
+
+  val child = get(log, "child")
+  #EXPECT(name(child) == "child")
+  #EXPECT( child != log )
+  set-level(child, LOG_INFO)
+  add(handlers(child), ConsoleHandler())
+  #EXPECT(get-level(child) == LOG_INFO)
+
+  kids = children(log)
+  #EXPECT(length(kids) == 1)
+
+  defn test-seq () :
+    info(child, "First Child Message")
+    error(child, "Second Child Message")
+
+  var err = capture-error(test-seq)
+
+  val lines = to-lines(err)
+  val expLines = [
+    "INFO:child:First Child Message",
+    "ERROR:child:Second Child Message",
+    "ERROR:child:Second Child Message",
+  ]
+  check-lines(lines, expLines)
+
+
+deftest(basics) test-no-propagation :
+
+  val log = setup-console-logger()
+  #EXPECT(name(log) == "test")
+
+  var kids = children(log)
+  #EXPECT(length(kids) == 0)
+
+  val child = get(log, "child")
+  #EXPECT(name(child) == "child")
+  #EXPECT( child != log )
+  set-level(child, LOG_INFO)
+  add(handlers(child), ConsoleHandler())
+  #EXPECT(get-level(child) == LOG_INFO)
+
+  kids = children(log)
+  #EXPECT(length(kids) == 1)
+
+  val gchild = get(child, "grandkid")
+  #EXPECT(name(gchild) == "grandkid")
+  #EXPECT( child != gchild )
+  #EXPECT( log != gchild )
+
+  set-level(gchild, LOG_WARN)
+  add(handlers(gchild), ConsoleHandler())
+
+  ; Set the child to not propagate. This means
+  ;   that we should see the messages on grandkid and
+  ;   child but not log
+  set-propagate(child, false)
+
+  defn test-seq () :
+    info(child, "First Child Message")
+    error(child, "Second Child Message")
+
+    info(gchild, "First GChild Message")
+    error(gchild, "Second GChild Message")
+
+  var err = capture-error(test-seq)
+
+  val lines = to-lines(err)
+  val expLines = [
+    "INFO:child:First Child Message",
+    "ERROR:child:Second Child Message",
+    "ERROR:grandkid:Second GChild Message", ; <-- GrandKid
+    "ERROR:grandkid:Second GChild Message", ; <-- Child
+  ]
+  check-lines(lines, expLines)
+
+
+deftest(basics) test-logger-filtering :
+
+  val log = setup-console-logger()
+  set-level(log, LOG_DEBUG)
+  #EXPECT(name(log) == "test")
+
+  val child = get(log, "child")
+  set-level(child, LOG_INFO)
+
+  val gchild = get(child, "gchild")
+  set-level(child, LOG_DEBUG)
+
+  ; Add a filter on root to remove any messages from,
+  ;   gchild.
+  add(filters(log), quell-by-name{"gchild", _})
+
+  defn test-seq () :
+    info(child, "First Child Message")
+    error(child, "Second Child Message")
+    debug(gchild, "First GChild Message")
+    error(gchild, "Second GChild Message")
+
+
+  var err = capture-error(test-seq)
+
+  val lines = to-lines(err)
+  val expLines = [
+    "INFO:child:First Child Message",
+    "ERROR:child:Second Child Message",
+  ]
+  check-lines(lines, expLines)
+
+deftest(basics) test-handler-filtering :
+
+  val log = setup-console-logger()
+  set-level(log, LOG_DEBUG)
+  #EXPECT(name(log) == "test")
+
+  val child = get(log, "child")
+  set-level(child, LOG_INFO)
+  val cH = ConsoleHandler()
+  add(filters(cH), quell-by-name{"gchild", _})
+  add(handlers(child), cH)
+
+  val gchild = get(child, "gchild")
+  set-level(child, LOG_DEBUG)
+
+  ; Add a filter on root to remove any messages from,
+  ;   gchild.
+  add(filters(log), quell-by-name{"gchild", _})
+
+  defn test-seq () :
+    info(child, "First Child Message")
+    error(child, "Second Child Message")
+    warn(gchild, "First GChild Message")
+    error(gchild, "Second GChild Message")
+
+
+  var err = capture-error(test-seq)
+
+  val lines = to-lines(err)
+  val expLines = [
+    "INFO:child:First Child Message",  ; <-- child
+    "INFO:child:First Child Message",  ; <-- log
+    "ERROR:child:Second Child Message", ; <-- child
+    "ERROR:child:Second Child Message", ; <-- log
+    "WARN:gchild:First GChild Message", ; <-- Log Only
+    "ERROR:gchild:Second GChild Message", ; <-- Log Only
+  ]
+  check-lines(lines, expLines)

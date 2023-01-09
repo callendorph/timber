@@ -1,0 +1,48 @@
+defpackage timber/LogRecord :
+  import core
+  import collections
+
+
+public defenum LogLevel:
+  LOG_TRACE
+  LOG_DEBUG
+  LOG_INFO
+  LOG_WARN
+  LOG_ERROR
+  LOG_FATAL
+
+public defn mk-string (lvl:LogLevel) :
+  switch {lvl == _}:
+    LOG_TRACE: "TRACE"
+    LOG_DEBUG: "DEBUG"
+    LOG_INFO: "INFO"
+    LOG_WARN: "WARN"
+    LOG_ERROR: "ERROR"
+    LOG_FATAL: "FATAL"
+
+public deftype LogRecord <: Equalable & Hashable
+
+public defmulti name (l:LogRecord) -> String
+public defmulti level (l:LogRecord) -> LogLevel
+public defmulti msg (l:LogRecord) -> String
+public defmulti exc_info (l:LogRecord) -> Maybe<Exception>
+public defmulti created (l:LogRecord) -> String
+; @TODO - file path and lineno would be useful.
+;  but I'm not sure how to access them at this point.
+
+public defn LogRecord (name:String, level:LogLevel, msg:String, exc_info:Maybe<Exception>) -> LogRecord :
+  val n = name
+  val l = level
+  val m = msg
+  val e = exc_info
+
+  new LogRecord:
+    defmethod name (this) : n
+    defmethod level (this) : l
+    defmethod msg (this) : m
+    defmethod exc_info (this) : e
+    defmethod hash (this) :
+      hash(n) + hash(to-int(l)) + hash(m) + hash(e)
+
+public defn LogRecord (name:String, level:LogLevel, msg:String) -> LogRecord :
+  LogRecord(name, level, msg, None())

@@ -1,0 +1,40 @@
+
+defpackage timber/Formatter :
+  import core
+  import collections
+  import timber/LogRecord
+
+
+public deftype Formatter <: Equalable & Hashable
+
+; Provide a format for the output log message:
+;  We use the `{}` style construction syntax because the default
+;  modulo (%) print syntax is underspecified. This will then be translated
+;  to something that make sense.
+public defmulti set-format (f:Formatter, fmt:String) -> False
+public defmulti get-format (f:Formatter) -> String
+public defmulti set-time-format (f:Formatter, fmt:String) -> False
+public defmulti get-time-format (f:Formatter) -> String
+public defmulti format (f:Formatter, record:LogRecord) -> String
+
+public defn Formatter (fmt:String, time-fmt:String) -> Formatter :
+  var m-fmt = fmt
+  var t-fmt = time-fmt
+
+  new Formatter:
+    defmethod set-format (this, fmt:String): m-fmt = fmt
+    defmethod get-format (this): m-fmt
+    defmethod set-time-format (this, fmt:String) : t-fmt = fmt
+    defmethod get-time-format (this) : t-fmt
+    defmethod format (this, record) :
+      to-string("%_:%_:%_" % [mk-string(level(record)), name(record), msg(record)])
+    defmethod hash (this) -> Int:
+      (hash(m-fmt) * 51) + (hash(t-fmt) * 43)
+
+public defn Formatter () -> Formatter :
+  ; @TODO implement proper format strings here for the
+  ;  defaults we want to use.
+  Formatter("", "")
+
+public defmethod equal? (a:Formatter, b:Formatter) -> True|False :
+  hash(a) == hash(b)
