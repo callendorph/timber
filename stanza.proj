@@ -1,6 +1,16 @@
 packages timber/* defined-in "src/"
 packages timber/tests/* defined-in "tests/"
 
-; build main :
-;   inputs:
-;   pkg: "pkgs"
+build main :
+  inputs:
+    timber/Logger
+    timber/Formatter
+    timber/LogRecord
+  pkg: "pkgs"
+
+build-test timber-tests :
+  inputs:
+    timber/tests/Logger
+    timber/tests/Formatter
+  pkg: "test-pkgs"
+  o: "timber-tests"
